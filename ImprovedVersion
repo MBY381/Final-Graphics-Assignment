@@ -1,0 +1,606 @@
+#include <windows.h>
+#include <GL/freeglut.h>
+#include <stdlib.h>
+#include<stdio.h>
+
+#pragma warning(disable:4996)
+static int year = 0, day = 0;
+static int longitude = 200, latitude = 200;
+static GLuint texture[3] = { 0,0,0 };
+static GLfloat xequalzero[] = { 1.0, 0.0, 0.0, 0.0 };
+static GLfloat yequalzero[] = { 0.0, 1.0, 0.0, 0.0 };
+static GLfloat slanted[] = { 1.0, 1.0, 1.0, 0.0 };
+static GLfloat* currentCoeff;
+static GLenum currentPlane;
+static GLint currentGenMode;
+
+GLfloat  whiteLight[] = { 0.2f,0.2f,0.2f,1.0f };
+GLfloat  lightPos[] = { 0.0f,0.0f,0.0f,1.0f };
+static GLfloat axix = 0.0, axiy = 0.0, z = 5.0;
+
+int mercuryyear = 0.0, venusyear = 0.0, marsyear = 0.0, jupiteryear = 0.0, saturnyear = 0.0, uranusyear = 0.0, neptuneyear = 0.0;//八大行星公转周期,以地球作为参考
+int moonyear = 0;//月亮在地球自转时需要抵消
+
+
+
+GLubyte* readImg(const char* filename, int* imagewidth, int* imageheight)
+{
+    //打开文件
+    int pixellength;
+    GLubyte* pixeldata;
+    FILE* pfile = fopen(filename, "rb");
+    if (pfile == 0) exit(0);
+    //读取图像大小
+    fseek(pfile, 0x0012, SEEK_SET);
+    fread(imagewidth, sizeof(*imagewidth), 1, pfile);
+    fread(imageheight, sizeof(*imageheight), 1, pfile);
+
+    //计算像素数据长度
+    pixellength = (*imagewidth) * 3;
+    while (pixellength % 4 != 0)pixellength++;
+    pixellength *= (*imageheight);
+
+    //读取像素数据
+    pixeldata = (GLubyte*)malloc(pixellength);
+    if (pixeldata == 0) exit(0);
+
+    fseek(pfile, 54, SEEK_SET);
+    fread(pixeldata, pixellength, 1, pfile);
+
+    //关闭文件
+    fclose(pfile);
+    return pixeldata;
+}
+
+void LoadTexture(const char* filename, GLuint& texture)
+{
+
+    GLubyte* data;
+    GLint width, height;
+    FILE* file;
+
+    //读文件
+    data = readImg(filename, &width, &height);
+    //glDrawPixels(width,height,GL_RGB,GL_UNSIGNED_BYTE,data);
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);//绑定纹理
+    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+    //线性滤图
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+       //自动生成纹理坐标，使用球面映射
+
+    currentCoeff = xequalzero;
+    currentGenMode = GL_OBJECT_LINEAR;
+    currentPlane = GL_OBJECT_PLANE;
+
+    //生参数1:GL_UNPACK_ALIGNMENT ，指定OpenGL如何从数据缓存区中解包图像数据
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, 3, width, height, 0, GL_BGR_EXT, GL_UNSIGNED_BYTE, data);
+
+    glEnable(GL_TEXTURE_2D);//打开纹理映射
+
+    free(data); //释放纹理图像数据，纹理数据已由上一句生成并保存到纹理缓存中，使用完毕后应用glDeleteTextures释放纹理缓存
+}
+
+
+void init(void)
+{
+    glClearColor(0.0, 0.0, 0.0, 0.0);
+    //glClearDepth(1.0);
+
+    glShadeModel(GL_SMOOTH);    //对多边形内部所有点的颜色通过对多边形顶点颜色插值产生，相当于gouraud明暗处理
+    //glShadeModel (GL_FLAT);   //对多边形内部所有点的使用相同的颜色
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+
+    GLfloat mat_diffuse[] = { 1.0, 1.0, 1.0, 1.0 };  //漫放射系数，对应RGBA四个分量，A分量在混合开启后有效
+
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 5.0 };
+
+
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, mat_diffuse);//设置环境光系数和漫反射光系数
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);//set material 镜面光反射
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);//设置材料反射指数
+
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+
+}
+
+
+void SunProperity()//太阳系几大星球的一些参数
+{
+    //太阳为红色
+    GLfloat lmodel_ambient[] = { 1.0,1.0,1.0,1.0 };//设置光
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+
+}
+
+void MercuryProperity()//水星
+{
+    //水星为灰色
+    GLfloat lmodel_ambient[] = { 1.0 ,1.0 ,1.0 ,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);;
+
+}
+
+void VenusProperity()//金星
+{
+    //金星为橘黄色
+
+    GLfloat lmodel_ambient[] = { 1.0,1.0,1.0,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+
+}
+
+void EarthProperity()//地球
+{
+    //地球为蓝色
+
+
+    GLfloat lmodel_ambient[] = { 1.0, 1.0, 1.0,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+
+}
+
+void MoonProperity()//月球
+{
+
+    GLfloat lmodel_ambient[] = { 0.8,0.8,0.8,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+
+}
+
+void MarsProperity()//火星
+{
+    GLfloat lmodel_ambient[] = { 1.0,1.0,1.0,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+
+}
+
+void JupiterProperity()//木星
+{
+     GLfloat lmodel_ambient[] = { 1.0,1.0,1.0,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+
+}
+
+
+void SaturnProperity()//土星
+{
+ 
+    GLfloat lmodel_ambient[] = { 1.0, 1.0, 1.0,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+}
+
+void UranusProperity()//天王星
+{
+
+    GLfloat lmodel_ambient[] = { 1.0,1.0,1.0,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+
+}
+
+void NeptuneProperity()//海王星
+{
+    GLfloat lmodel_ambient[] = { 1.0,1.0,1.0,1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 }; //镜面放射系数,对应RGBA四个分量，A分量在混合开启后有效
+    GLfloat mat_shininess[] = { 50.0 };
+
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, lmodel_ambient);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+}
+
+
+void showBackground()
+{
+    glMatrixMode(GL_MODELVIEW);  //使用模型视图矩阵栈保存后面的几何变换
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\collection\\StarsandGalaxy.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);
+    glTranslatef(0.0, 0.0, -10.0);               //  平移变换T2
+    glScalef(80, 80, 1);
+    glBegin(GL_QUADS);
+    glTexCoord2d(0.0, 0.0); 
+    glVertex2d(-1.0, -1.0);
+    glTexCoord2d(1.0, 0.0); 
+    glVertex2d(+1.0, -1.0);
+    glTexCoord2d(1.0, 1.0); 
+    glVertex2d(+1.0, +1.0);
+    glTexCoord2d(0.0, 1.0); 
+    glVertex2d(-1.0, +1.0);
+    glEnd();			//背景方块
+    
+}
+
+
+void showSun()//绘制太阳
+{
+
+   glMatrixMode(GL_MODELVIEW);  //使用模型视图矩阵栈保存后面的几何变换
+
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Sun1.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+
+    glLoadIdentity();             /* clear the matrix */
+            /* viewing transformation  */
+    gluLookAt(axix, axiy, z, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+    glPushMatrix();
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 1, 60, 60);//二次曲面qobj
+    glPopMatrix();
+
+}
+
+void showMercury()//绘制水星
+{
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Mercury1.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+    glPushMatrix();
+    MercuryProperity();
+    glRotatef((GLfloat)mercuryyear, 0.0, 1.0, 0.0);  // 旋转变换T1
+    glTranslatef(1.5, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 0.05, 60, 60);//二次曲面qobj //绘制水星
+    glPopMatrix();
+
+
+}
+
+void showVenus()//绘制金星
+{
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Venus1.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+    glPushMatrix();
+    VenusProperity();
+    glRotatef((GLfloat)venusyear, 0.0, 1.0, 0.0);  // 旋转变换T1
+    glTranslatef(1.8, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 0.1, 60, 60);//二次曲面qobj  //绘制金星
+    glPopMatrix();
+
+}
+
+
+void showEarthandMoon()//绘制地月系统
+{
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Earth1.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+    glPushMatrix();
+
+    EarthProperity();
+    glRotatef((GLfloat)year, 0.0, 1.0, 0.0);  // 旋转变换T1，公转
+    glTranslatef(2.3, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3，自转
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 0.15, 60, 60);//二次曲面qobj   //绘制地球
+
+    MoonProperity();
+    glRotatef((GLfloat)moonyear, 0.0, 1.0, 0.0);  // 旋转变换T1//公转
+    glTranslatef(0.2, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3//自转
+    glutSolidSphere(0.02, longitude, latitude); //绘制月球
+
+    glPopMatrix();
+
+}
+
+
+void showMars()//绘制火星
+{
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Mars1.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+    glPushMatrix();
+
+    MarsProperity();
+    glRotatef((GLfloat)marsyear, 0.0, 1.0, 0.0);  // 旋转变换T1
+    glTranslatef(2.8, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 0.09, 60, 60);//二次曲面qobj  //绘制火星
+
+    glPopMatrix();
+
+}
+
+void showJupiter()//绘制木星
+{
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Jupiter1.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+    glPushMatrix();
+
+    JupiterProperity();
+    glRotatef((GLfloat)jupiteryear, 0.0, 1.0, 0.0);  // 旋转变换T1
+    glTranslatef(3.5, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3
+    glRotatef(-90, 1.0, 0.0, 0.0);
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 0.35, 60, 60);//二次曲面qobj 
+
+    glPopMatrix();
+
+}
+
+void showSaturn()//绘制土星
+{
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Saturn1.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+    glPushMatrix();
+
+    SaturnProperity();
+    glRotatef((GLfloat)saturnyear, 0.0, 1.0, 0.0);  // 旋转变换T1
+    glTranslatef(4.5, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3
+    glRotatef(-90, 1.0, 0.0, 0.0);
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 0.22, 60, 60);//二次曲面qobj  //绘制土星
+    
+    //绘制行星环
+    glRotatef(10, 1.0, 0, 0.0);
+    glutSolidTorus(0.01, 0.35, 3, 100);
+    glPopMatrix();
+}
+
+void showUranus()//绘制天王星
+{
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Uranus.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+    glPushMatrix();
+
+    UranusProperity();
+    glRotatef((GLfloat)uranusyear, 0.0, 1.0, 0.0);  // 旋转变换T1
+    glTranslatef(5.5, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3
+    glRotatef(-90, 1.0, 0.0, 0.0);
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 0.17, 60, 60);//二次曲面qobj //绘制天王星
+
+    glPopMatrix();
+
+}
+
+
+void showNeptune()//绘制海王星
+{
+    LoadTexture("E:\\textureEarth\\bin\\Debug\\picture\\Neptune.bmp", texture[0]);//创建并绑定纹理对象
+    GLUquadricObj* qobj;
+    qobj = gluNewQuadric();
+
+    glPushMatrix();
+    NeptuneProperity();
+    glRotatef((GLfloat)neptuneyear, 0.0, 1.0, 0.0);  // 旋转变换T1
+    glTranslatef(6.3, 0.0, 0.0);               //  平移变换T2
+    glRotatef((GLfloat)day, 0.0, 1.0, 0.0);    // 旋转变换T3
+    glRotatef(-90, 1.0, 0.0, 0.0);
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    gluQuadricTexture(qobj, GL_TRUE);//纹理函数,使用该纹理坐标函数时，不要同时使用纹理坐标自动生成glEnable(GL_TEXTURE_GEN_S);
+    gluSphere(qobj, 0.16, 60, 60);//二次曲面qobj //绘制天王星 //绘制天王星
+    glPopMatrix();
+
+}
+
+
+void display(void)
+{
+   
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    showBackground();
+    showSun();
+    showMercury();
+    showVenus();
+    showEarthandMoon();
+    showMars();
+    showJupiter();
+    showSaturn();
+    showUranus();
+    showNeptune();
+    glutSwapBuffers();
+  
+}
+
+void reshape(int w, int h)
+{
+    glViewport(0, 0, (GLsizei)w, (GLsizei)h);  //使视区大小保持与窗口的显示区域大小一致
+    glMatrixMode(GL_MODELVIEW);                    //使用模型视图矩阵栈
+    glLoadIdentity();
+    //gluLookAt(axix, axiy, z, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+    glMatrixMode(GL_PROJECTION);                 //使用投影矩阵栈，准备设定投影矩阵
+    glLoadIdentity();                            //初始化投影矩阵为单位矩阵
+
+    gluPerspective(60.0, (GLfloat)w / (GLfloat)h, 0.5, 30.0);
+}
+
+void keyboard(unsigned char key, int x, int y)
+{
+    switch (key) {
+    case 'e':
+        day = (day + 10) % 360;   //增加自转的角度，逆时针旋转
+        moonyear = (moonyear - 10) % 360;//此时月球需要抵消地球的的影响
+        glutPostRedisplay();
+        break;
+    case 'E':
+        day = (day - 10) % 360;   //减少自转的角度，顺时针旋转
+        moonyear = (moonyear + 10) % 360;//此时月球需要抵消地球的的影响，不能跟着旋转，所以需要反方向旋转相同的角度
+        glutPostRedisplay();
+        break;
+    case 's':
+        year = (year + 6) % 360;  //增加公转的角度，逆时针旋转
+        mercuryyear = (mercuryyear + 10) % 360;
+        venusyear = (venusyear + 8) % 360;
+        marsyear = (marsyear + 5) % 360;
+        jupiteryear = (jupiteryear + 4) % 360;
+        saturnyear = (saturnyear + 3) % 360;
+        uranusyear = (uranusyear + 2) % 360;
+        neptuneyear = (neptuneyear + 1) % 360;
+        glutPostRedisplay();
+        break;
+    case 'S':
+        year = (year - 6) % 360;  //减少公转的角度，顺时针旋转
+        mercuryyear = (mercuryyear - 10) % 360;
+        venusyear = (venusyear - 8) % 360;
+        marsyear = (marsyear - 5) % 360;
+        jupiteryear = (jupiteryear - 4) % 360;
+        saturnyear = (saturnyear - 3) % 360;
+        uranusyear = (uranusyear - 2) % 360;
+        neptuneyear = (neptuneyear - 1) % 360;
+        glutPostRedisplay();
+        break;
+    case 'y':
+        day = (day + 10) % 360;   //减少自转的角度，顺时针旋转,此时不需要抵消影响
+        glutPostRedisplay();
+        break;
+    case 'Y':
+        day = (day - 10) % 360;   //减少自转的角度，顺时针旋转,此时不需要抵消影响
+        glutPostRedisplay();
+        break;
+        //改变观察者视角
+    case 'a':
+        axix += 0.1;
+        glutPostRedisplay();
+        break;
+    case 'A':
+        axix -= 0.1;
+        glutPostRedisplay();
+        break;
+    case 'd':
+        axiy += 0.1;
+        glutPostRedisplay();
+        break;
+    case 'D':
+        axiy -= 0.1;
+        glutPostRedisplay();
+        break;
+    case 'w':
+        z += 0.1;
+        glutPostRedisplay();
+        break;
+    case 'W':
+        z -= 0.1;
+        glutPostRedisplay();
+        break;
+    case 'l':
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //使用线框模型显示物体
+        glDisable(GL_LIGHTING);
+        longitude = 20;
+        latitude = 16;
+        glutPostRedisplay();
+        break;
+    case 'f':
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL); //使用多边形填充模型型显示物体
+        glEnable(GL_LIGHTING);
+        longitude = 200;
+        latitude = 200;
+        glutPostRedisplay();
+        break;
+    case 27:
+        exit(0);
+        break;
+    default:
+        break;
+    }
+}
+
+int main(int argc, char** argv)
+{
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
+    glutInitWindowSize(600, 600);
+    glutInitWindowPosition(50, 50);
+    glutCreateWindow(argv[0]);
+    init();
+    glutDisplayFunc(display);
+    glutReshapeFunc(reshape);
+    glutKeyboardFunc(keyboard);
+    glutMainLoop();
+    return 0;
+}
